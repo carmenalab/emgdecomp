@@ -1,4 +1,4 @@
-# emgdecomp
+# EMGDecomp
 
 ![](https://img.shields.io/pypi/v/emgdecomp) [![DOI](https://zenodo.org/badge/423892522.svg)](https://zenodo.org/badge/latestdoi/423892522)
 
