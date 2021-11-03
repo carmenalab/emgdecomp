@@ -35,21 +35,46 @@ firings = decomp.decompose(data)
 print(firings)
 ```
 
-The resulting firings is suitable for conversion into a Pandas DataFrame:
+The resulting `firings` object is a NumPy structured array containing the columns `source_idx`, `discharge_samples`, and `discharge_seconds`. `source_idx` is a 0-indexed ID for each "source" learned from the data; each source is a putative motor unit. `discharge_samples` indicates the sample at which the source was detected as "firing"; note that the algorithm can only detect sources up to a delay. `discharge_seconds` is the conversion of `discharge_samples` into seconds via the passed-in sampling rate.
+
+As a structured NumPy array, the resulting `firings` object is suitable for conversion into a Pandas DataFrame:
 
 ```python
 import pandas as pd
 print(pd.DataFrame(firings))
 ```
 
-And the "sources" (i.e. components corresponding to motor units) can be interrogated as needed:
+And the "sources" (i.e. components corresponding to motor units) can be interrogated as needed via the `decomp.model` property:
 
 ```python
 model = decomp.model
 print(model.components)
 ```
 
-Basic plotting capabilities are included as well:
+### Advanced
+
+Given an already-fit `EmgDecomposition` object, you can then decompose a new batch of EMG data with its existing sources via `transform`:
+
+```python
+# Assumes decomp is already fit
+new_data = fetch_more_data(...)
+new_firings = decomp.transform(new_data)
+print(new_firings)
+```
+
+Alternatively, you can add new sources (i.e. new putative motor units) while retaining the existing sources with `decompose_batch`:
+
+```python
+# Assumes decomp is already fit
+
+more_data = fetch_even_more_data(...)
+# Firings corresponding to sources that were both existing and newly added
+firings2 = decomp.decompose_batch(more_data)
+# Should have at least as many components as before decompose_batch()
+print(decomp.model.components)
+```
+
+Finally, basic plotting capabilities are included as well:
 
 ```python
 from emgdecomp.plots import plot_firings, plot_muaps
@@ -74,6 +99,9 @@ Both Dask and CUDA are supported within EmgDecomposition for support for distrib
 ### Parameter Tuning
 
 See the list of parameters in [EmgDecompositionParameters](https://github.com/carmenalab/emgdecomp/blob/master/emgdecomp/parameters.py). The defaults on `master` are set as they were used for Formento et. al, 2021 and should be reasonable defaults for others.
+
+## Documentation
+See documentation on classes `EmgDecomposition` and `EmgDecompositionParameters` for more details.
 
 ## Acknowledgements
 If you enjoy this package and use it for your research, you can:
