@@ -7,13 +7,13 @@ Package for decomposing EMG signals into motor unit firings, created for Forment
 
 ## Installation
 
-```
+```bash
 pip install emgdecomp
 ```
 
 For those that want to either use [Dask](https://dask.org/) and/or [CUDA](https://cupy.dev/), you can alternatively run:
 
-```
+```bash
 pip install emgdecomp[dask]
 pip install emgdecomp[cuda]
 ```
@@ -22,7 +22,7 @@ pip install emgdecomp[cuda]
 
 ### Basic
 
-```
+```python
 # data should be a numpy array of n_channels x n_samples
 sampling_rate, data = fetch_data(...)
 
@@ -37,21 +37,21 @@ print(firings)
 
 The resulting firings is suitable for conversion into a Pandas DataFrame:
 
-```
+```python
 import pandas as pd
 print(pd.DataFrame(firings))
 ```
 
 And the "sources" (i.e. components corresponding to motor units) can be interrogated as needed:
 
-```
+```python
 model = decomp.model
 print(model.components)
 ```
 
 Basic plotting capabilities are included as well:
 
-```
+```python
 from emgdecomp.plots import plot_firings, plot_muaps
 plot_muaps(decomp, data, firings)
 plot_firings(decomp, data, firings)
@@ -60,7 +60,7 @@ plot_firings(decomp, data, firings)
 ### File I/O
 The `EmgDecomposition` class is equipped with `load` and `save` methods that can save/load parameters to disk as needed; for example:
 
-```
+```python
 with open('/path/to/decomp.pkl', 'wb') as f:
   decomp.save(f)
 
@@ -73,7 +73,7 @@ Both Dask and CUDA are supported within EmgDecomposition for support for distrib
 
 ### Parameter Tuning
 
-See the list of parameters in EmgDecompositionParameters. The defaults are set as they were used for Formento et. al, 2021.
+See the list of parameters in [EmgDecompositionParameters](https://github.com/carmenalab/emgdecomp/blob/master/emgdecomp/parameters.py). The defaults on `master` are set as they were used for Formento et. al, 2021 and should be reasonable defaults for others.
 
 ## Acknowledgements
 If you enjoy this package and use it for your research, you can:
