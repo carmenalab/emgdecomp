@@ -1,5 +1,9 @@
 # emgdecomp
+
+![](https://img.shields.io/pypi/v/emgdecomp) [![DOI](https://zenodo.org/badge/423892522.svg)](https://zenodo.org/badge/latestdoi/423892522)
+
 Package for decomposing EMG signals into motor unit firings, created for Formento et al 2021. Based heavily on Negro et al, 2016. Supports GPU via CUDA and distributed computation via Dask.
+
 
 ## Installation
 
@@ -74,8 +78,8 @@ See the list of parameters in EmgDecompositionParameters. The defaults are set a
 ## Acknowledgements
 If you enjoy this package and use it for your research, you can:
 
-- cite the Journal of Neural Engineering paper, Formento et. al 2021, for which this package was developed: 
-- cite this github repo using its DOI: TODO
+- cite the Journal of Neural Engineering paper, Formento et. al 2021, for which this package was developed: TODO
+- cite this github repo using its DOI: 10.5281/zenodo.5641426
 - star this repo using the top-right star button.
 
 ## Contributing / Questions
