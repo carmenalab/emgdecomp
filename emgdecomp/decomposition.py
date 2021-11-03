@@ -68,122 +68,6 @@ class EmgDecompositionModel(object):
     components: Components
 
 
-def compute_percentage_coincident(spike_train_1: np.ndarray, spike_train_2: np.ndarray) -> float:
-    # Stable ordering of the spike trains
-    if len(spike_train_2) < len(spike_train_1):
-        spike_train_1, spike_train_2 = spike_train_2, spike_train_1
-    distances = minimum_distances(spike_train_1, spike_train_2)
-    mode, _ = stats.mode(distances)
-    mode = mode[0]
-    counts = np.sum((distances == mode) | (distances == mode + 1) | (distances == mode - 1))
-    return counts / max(len(spike_train_1), len(spike_train_2))
-
-
-def compute_rate_of_agreement(spike_train_1: np.ndarray, spike_train_2: np.ndarray) -> float:
-    """ Rate of agreement as (possibly) computed in Barsakcioglu et al. 2020 """
-    if len(spike_train_1) > len(spike_train_2):
-        spike_train_1, spike_train_2 = spike_train_2, spike_train_1
-    distances = minimum_distances(spike_train_1, spike_train_2)
-    mode, _ = stats.mode(distances)
-    mode = mode[0]
-    n_common = np.sum((distances == mode) | (distances == mode + 1) | (distances == mode - 1))
-    roa = 100 * n_common / (len(spike_train_1) + len(spike_train_2) - n_common)
-    return roa
-
-
-def get_compute_spike_distance():
-    # pip install pyspike fails on python > 3.7 - install from sources as described here:
-    # http://mariomulansky.github.io/PySpike/#install-from-github-sources
-    import pyspike as spk
-
-    def _compute_spike_distance(spike_train_1: np.ndarray, spike_train_2: np.ndarray) -> float:
-        t_start = np.min([np.min(spike_train_1), np.min(spike_train_2)])
-        t_stop = np.max([np.max(spike_train_2), np.max(spike_train_2)])
-        spike_train_1 = spk.SpikeTrain(spike_train_1, [t_start, t_stop])
-        spike_train_2 = spk.SpikeTrain(spike_train_2, [t_start, t_stop])
-        return 1 - spk.spike_distance(spike_train_1, spike_train_2)
-
-    return _compute_spike_distance
-
-
-def find_duplicates(spike_trains_source_indexes: Union[np.ndarray, pd.Series],
-                    spike_trains_sample_indexes: Union[np.ndarray, pd.Series],
-                    similarity_func: Callable[[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.Series]], float],
-                    max_similarity: float = 0.5,
-                    keep_first_n_sources: int = 0) -> List[List[int]]:
-    unique_sources = np.unique(spike_trains_source_indexes)
-    similarity = np.zeros((len(unique_sources), len(unique_sources)), dtype=np.float64)
-    for i, source_i in enumerate(unique_sources):
-        for j in range(keep_first_n_sources, len(unique_sources)):
-            if i <= j:
-                # Matrix is symmetric, only compute half
-                continue
-            spike_train_1 = spike_trains_sample_indexes[spike_trains_source_indexes == source_i]
-            spike_train_2 = spike_trains_sample_indexes[spike_trains_source_indexes == unique_sources[j]]
-            similarity[i, j] = similarity_func(spike_train_1, spike_train_2)
-
-    # Group sources by high (> params.max_similarity) similarity
-    edges = collections.defaultdict(set)
-    for x, y in np.argwhere(similarity > max_similarity):
-        source_x = unique_sources[x]
-        source_y = unique_sources[y]
-        edges[source_x].add(source_y)
-        edges[source_y].add(source_x)
-
-    # Make sure all unique and/or old sources are counted
-    tot_sources = set(list(range(keep_first_n_sources)) + unique_sources.tolist())
-    for source in tot_sources:
-        if source not in edges:
-            edges[source] = set([])
-    return find_disconnected_subgraphs(edges)
-
-
-def remove_duplicates(spike_trains_source_indexes: Union[np.ndarray, pd.Series],
-                      spike_trains_sample_indexes: Union[np.ndarray, pd.Series],
-                      similarity_func: Callable[[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.Series]], float],
-                      max_similarity: float = 0.5,
-                      keep_first_n_sources: int = 0):
-    subgraphs = find_duplicates(
-        spike_trains_source_indexes=spike_trains_source_indexes,
-        spike_trains_sample_indexes=spike_trains_sample_indexes,
-        similarity_func=similarity_func,
-        max_similarity=max_similarity,
-        keep_first_n_sources=keep_first_n_sources)
-    groups_by_source_idx = {}
-    for group_idx, group in enumerate(subgraphs):
-        for source_idx in group:
-            groups_by_source_idx[source_idx] = group_idx
-
-    num_groups = len(groups_by_source_idx)
-    tot_sources = set(groups_by_source_idx.keys())
-
-    # For each group, just keep the source with the highest number of detected spike
-    kept_sources_by_group = {}
-    for source_idx in tot_sources:
-        group = groups_by_source_idx[source_idx]
-        if group not in kept_sources_by_group or np.sum(spike_trains_source_indexes == source_idx) > np.sum(
-                spike_trains_source_indexes == kept_sources_by_group[group]):
-            kept_sources_by_group[group] = source_idx
-
-    source_mapping = {}
-    for group, remaining_source_idx in kept_sources_by_group.items():
-        for source_idx, group_idx in groups_by_source_idx.items():
-            if group_idx == group:
-                source_mapping[source_idx] = remaining_source_idx
-    for source_idx in tot_sources:
-        if source_idx not in source_mapping:
-            source_mapping[source_idx] = source_idx
-
-    remaining_source_idxs = list(kept_sources_by_group.values())
-    logging.info('{}/{} total groups found [for each source idx: {}]. '
-                 'Keeping the following for each group idx: {}'.format(num_groups,
-                                                                       len(tot_sources),
-                                                                       groups_by_source_idx,
-                                                                       kept_sources_by_group))
-
-    return remaining_source_idxs, source_mapping
-
-
 class EmgDecomposition(object):
     """
     Decomposes surface or intramuscular EMG primarily according to Negro 2016, "Multichannel Blind Source
@@ -276,7 +160,7 @@ class EmgDecomposition(object):
         self._model = None
 
     def clear(self):
-        # self._raw_sources = None
+        self._raw_sources = None
         self._model = None
         if self._use_cuda:
             logging.info('Clearing gpu memory.')
@@ -298,6 +182,9 @@ class EmgDecomposition(object):
 
     def decompose(self, data: np.ndarray) -> np.ndarray:
         """
+        Performs the decomposition on the given data. This method should only be called once. If you want to add
+        sources to an existing decomposition, use decompose_batch().
+
         :param data: n_channels x n_samples array, or n_channels x n_samples x n_chunks if your data is chunked (e.g.
          if you're just decomposing threshold crossings or small snippets of data).
         This data should already be bandpass filtered to remove noise and downsampled sufficiently to decrease
@@ -310,6 +197,7 @@ class EmgDecomposition(object):
         'discharge_samples' is the discharge timing in samples, and 'discharge_seconds' timing in seconds. Other
         relevant parameters can be found in the `model` property.
         """
+        self._check_not_decomposed()
 
         # 1) Data preprocessing: extend, subtract mean, whiten
         whitened_data = self._data_preprocessing(data)
@@ -322,6 +210,7 @@ class EmgDecomposition(object):
 
         if len(wi_init_indices) == 0:
             logging.warning('Cannot initialize sources as no peak was present in the provided data; aborting.')
+            self.model = None
             return np.empty((0,), dtype=self._firings_dtype())
 
         # 3) Do decomposition similar to Negro 2016
@@ -336,11 +225,12 @@ class EmgDecomposition(object):
         # baseline activity.
         return self._do_post_processing(whitened_data, original_data=data, old_thresholds=None, old_waveforms=None)
 
-    def decompose_batch(self, data: np.ndarray):
+    def decompose_batch(self, data: np.ndarray) -> np.ndarray:
         """
         Given a previous decomposition parameters, this searches for new sources in a batch of emg data. Existing
         sources, as given by the `model` property, will not be touched; only new sources will be added if any are found.
         The returned firings will contain firings belonging to any existing sources and the newly detected sources.
+        In order to use this method, #decompose() must have already been called.
 
         :param data: n_channels x n_samples array, or n_channels x n_samples x n_chunks if your data is chunked (e.g.
          if you're just decomposing threshold crossings or small snippets of data).
@@ -383,6 +273,73 @@ class EmgDecomposition(object):
             original_data=data,
             old_thresholds=old_thresholds,
             old_waveforms=old_waveforms)
+
+    def save(self, io):
+        """
+        Saves the various parameters to a file given by `io` necessary to reconstruct this EmgDecomposition.
+        """
+        pickle.dump({
+            'params': self.params,
+            'model': self._model,
+            'verbose': self._verbose,
+            'use_dask': self._use_dask,
+            'use_cuda': self._use_cuda,
+        }, io)
+
+    @staticmethod
+    def load(io) -> 'EmgDecomposition':
+        """
+        Loads and creates an instance of EmgDecomposition that was created using #save().
+        """
+        obj = pickle.load(io)
+        ret = EmgDecomposition(
+            params=obj['params'],
+            verbose=obj['verbose'],
+            use_cuda=obj['use_cuda'],
+            use_dask=obj['use_dask'],
+        )
+        ret.model = obj['model']
+        return ret
+
+    def transform(self, data: np.ndarray) -> np.ndarray:
+        """
+        Detects firings in the given data using a model that was already fit on this data. There must be a `model` set
+        on this EmgDecomposition; assign a new model via performing a decomposition, using the `model` setter, or use
+        #load() to load a saved model.
+        """
+        self._check_decomposed()
+
+        whitened_data = self._data_preprocessing(data)
+        thresholds = self._model.components.get_thresholds()
+        waveforms = self._model.components.get_waveforms()
+        return self._do_post_processing(
+            whitened_data=whitened_data,
+            original_data=data,
+            old_thresholds=thresholds,
+            old_waveforms=waveforms)
+
+    def projected_data(self, data: np.ndarray) -> np.ndarray:
+        """
+        :return: a <num_sources, num_time_samples> array of the computed sources activity. Projects the given data
+        into "source space".
+        """
+        self._check_decomposed()
+        whitened_data = self._data_preprocessing(data)
+        return whitened_data.project(self._model.components.get_sources())
+
+    def source_vectors(self) -> np.ndarray:
+        """
+        :return: a <num_channels x extension_factor, num_sources> array of the source vectors that were learned
+        """
+        self._check_decomposed()
+        return self._model.components.get_sources()
+
+    def num_sources(self) -> int:
+        """
+        :return: how many sources were identified during the metadata.
+        """
+        self._check_decomposed()
+        return len(self._model.components)
 
     def _data_preprocessing(self, data: np.ndarray) -> EmgDataManager:
         # Extend the data, computes the whitening matrix, and then creates the whitened data on the GPU or CPU as
@@ -905,49 +862,6 @@ class EmgDecomposition(object):
                 for i in range(sources.shape[1])
             ]))
 
-    def save(self, io):
-        """
-        Saves the various parameters to a file given by `io` necessary to reconstruct this EmgDecomposition.
-        """
-        pickle.dump({
-            'params': self.params,
-            'model': self._model,
-            'verbose': self._verbose,
-            'use_dask': self._use_dask,
-            'use_cuda': self._use_cuda,
-        }, io)
-
-    @staticmethod
-    def load(io) -> 'EmgDecomposition':
-        """
-        Loads and creates an instance of EmgDecomposition that was created using #save().
-        """
-        obj = pickle.load(io)
-        ret = EmgDecomposition(
-            params=obj['params'],
-            verbose=obj['verbose'],
-            use_cuda=obj['use_cuda'],
-            use_dask=obj['use_dask'],
-        )
-        ret.model = obj['model']
-        return ret
-
-    def transform(self, data: np.ndarray):
-        """
-        Detects firings in the given data using a model that was already fit on this data. There must be a `model` set
-        on this EmgDecomposition; assign a new model via the `model` setter or use #load().
-        """
-        self._check_decomposed()
-
-        whitened_data = self._data_preprocessing(data)
-        thresholds = self._model.components.get_thresholds()
-        waveforms = self._model.components.get_waveforms()
-        return self._do_post_processing(
-            whitened_data=whitened_data,
-            original_data=data,
-            old_thresholds=thresholds,
-            old_waveforms=waveforms)
-
     def _muap_waveforms(self,
                         firings: np.ndarray,
                         data: np.ndarray,
@@ -1076,32 +990,129 @@ class EmgDecomposition(object):
                                     align_to_global_maxima=align_to_global_maxima,
                                     return_extra_info=return_extra_info)
 
-    def projected_data(self, data: np.ndarray) -> np.ndarray:
-        """
-        :return: a <num_sources, num_time_samples> array of the computed sources activity. Projects the given data
-        into "source space".
-        """
-        self._check_decomposed()
-        whitened_data = self._data_preprocessing(data)
-        return whitened_data.project(self._model.components.get_sources())
-
-    def source_vectors(self) -> np.ndarray:
-        """
-        :return: a <num_channels x extension_factor, num_sources> array of the source vectors that were learned
-        """
-        self._check_decomposed()
-        return self._model.components.get_sources()
-
-    def num_sources(self) -> int:
-        """
-        :return: how many sources were identified during the metadata.
-        """
-        self._check_decomposed()
-        return len(self._model.components)
-
     def _check_decomposed(self):
         if self._model is None:
             raise ValueError('#decompose() has not been called yet!')
+
+    def _check_not_decomposed(self):
+        if self._model is not None:
+            raise ValueError('#decompose() cannot be called multiple times! Use decompose_batch().')
+
+
+def compute_percentage_coincident(spike_train_1: np.ndarray, spike_train_2: np.ndarray) -> float:
+    # Stable ordering of the spike trains
+    if len(spike_train_2) < len(spike_train_1):
+        spike_train_1, spike_train_2 = spike_train_2, spike_train_1
+    distances = minimum_distances(spike_train_1, spike_train_2)
+    mode, _ = stats.mode(distances)
+    mode = mode[0]
+    counts = np.sum((distances == mode) | (distances == mode + 1) | (distances == mode - 1))
+    return counts / max(len(spike_train_1), len(spike_train_2))
+
+
+def compute_rate_of_agreement(spike_train_1: np.ndarray, spike_train_2: np.ndarray) -> float:
+    """ Rate of agreement as (possibly) computed in Barsakcioglu et al. 2020 """
+    if len(spike_train_1) > len(spike_train_2):
+        spike_train_1, spike_train_2 = spike_train_2, spike_train_1
+    distances = minimum_distances(spike_train_1, spike_train_2)
+    mode, _ = stats.mode(distances)
+    mode = mode[0]
+    n_common = np.sum((distances == mode) | (distances == mode + 1) | (distances == mode - 1))
+    roa = 100 * n_common / (len(spike_train_1) + len(spike_train_2) - n_common)
+    return roa
+
+
+def get_compute_spike_distance():
+    # pip install pyspike fails on python > 3.7 - install from sources as described here:
+    # http://mariomulansky.github.io/PySpike/#install-from-github-sources
+    import pyspike as spk
+
+    def _compute_spike_distance(spike_train_1: np.ndarray, spike_train_2: np.ndarray) -> float:
+        t_start = np.min([np.min(spike_train_1), np.min(spike_train_2)])
+        t_stop = np.max([np.max(spike_train_2), np.max(spike_train_2)])
+        spike_train_1 = spk.SpikeTrain(spike_train_1, [t_start, t_stop])
+        spike_train_2 = spk.SpikeTrain(spike_train_2, [t_start, t_stop])
+        return 1 - spk.spike_distance(spike_train_1, spike_train_2)
+
+    return _compute_spike_distance
+
+
+def find_duplicates(spike_trains_source_indexes: Union[np.ndarray, pd.Series],
+                    spike_trains_sample_indexes: Union[np.ndarray, pd.Series],
+                    similarity_func: Callable[[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.Series]], float],
+                    max_similarity: float = 0.5,
+                    keep_first_n_sources: int = 0) -> List[List[int]]:
+    unique_sources = np.unique(spike_trains_source_indexes)
+    similarity = np.zeros((len(unique_sources), len(unique_sources)), dtype=np.float64)
+    for i, source_i in enumerate(unique_sources):
+        for j in range(keep_first_n_sources, len(unique_sources)):
+            if i <= j:
+                # Matrix is symmetric, only compute half
+                continue
+            spike_train_1 = spike_trains_sample_indexes[spike_trains_source_indexes == source_i]
+            spike_train_2 = spike_trains_sample_indexes[spike_trains_source_indexes == unique_sources[j]]
+            similarity[i, j] = similarity_func(spike_train_1, spike_train_2)
+
+    # Group sources by high (> params.max_similarity) similarity
+    edges = collections.defaultdict(set)
+    for x, y in np.argwhere(similarity > max_similarity):
+        source_x = unique_sources[x]
+        source_y = unique_sources[y]
+        edges[source_x].add(source_y)
+        edges[source_y].add(source_x)
+
+    # Make sure all unique and/or old sources are counted
+    tot_sources = set(list(range(keep_first_n_sources)) + unique_sources.tolist())
+    for source in tot_sources:
+        if source not in edges:
+            edges[source] = set([])
+    return find_disconnected_subgraphs(edges)
+
+
+def remove_duplicates(spike_trains_source_indexes: Union[np.ndarray, pd.Series],
+                      spike_trains_sample_indexes: Union[np.ndarray, pd.Series],
+                      similarity_func: Callable[[Union[np.ndarray, pd.Series], Union[np.ndarray, pd.Series]], float],
+                      max_similarity: float = 0.5,
+                      keep_first_n_sources: int = 0):
+    subgraphs = find_duplicates(
+        spike_trains_source_indexes=spike_trains_source_indexes,
+        spike_trains_sample_indexes=spike_trains_sample_indexes,
+        similarity_func=similarity_func,
+        max_similarity=max_similarity,
+        keep_first_n_sources=keep_first_n_sources)
+    groups_by_source_idx = {}
+    for group_idx, group in enumerate(subgraphs):
+        for source_idx in group:
+            groups_by_source_idx[source_idx] = group_idx
+
+    num_groups = len(groups_by_source_idx)
+    tot_sources = set(groups_by_source_idx.keys())
+
+    # For each group, just keep the source with the highest number of detected spike
+    kept_sources_by_group = {}
+    for source_idx in tot_sources:
+        group = groups_by_source_idx[source_idx]
+        if group not in kept_sources_by_group or np.sum(spike_trains_source_indexes == source_idx) > np.sum(
+                spike_trains_source_indexes == kept_sources_by_group[group]):
+            kept_sources_by_group[group] = source_idx
+
+    source_mapping = {}
+    for group, remaining_source_idx in kept_sources_by_group.items():
+        for source_idx, group_idx in groups_by_source_idx.items():
+            if group_idx == group:
+                source_mapping[source_idx] = remaining_source_idx
+    for source_idx in tot_sources:
+        if source_idx not in source_mapping:
+            source_mapping[source_idx] = source_idx
+
+    remaining_source_idxs = list(kept_sources_by_group.values())
+    logging.info('{}/{} total groups found [for each source idx: {}]. '
+                 'Keeping the following for each group idx: {}'.format(num_groups,
+                                                                       len(tot_sources),
+                                                                       groups_by_source_idx,
+                                                                       kept_sources_by_group))
+
+    return remaining_source_idxs, source_mapping
 
 
 # Standard non-linear functions coming from sklearn/metadata/_fastica.py
@@ -1112,14 +1123,17 @@ def _logcosh(da, xp, x):
     g_x = (1 - gx ** 2).mean(axis=-1)
     return gx, g_x
 
+
 def _exp(da, xp, x):
     exp = xp.exp(-(x ** 2) / 2)
     gx = x * exp
     g_x = (1 - x ** 2) * exp
     return gx, g_x.mean(axis=-1)
 
+
 def _cube(da, xp, x):
     return x ** 3, (3 * x ** 2).mean(axis=-1)
+
 
 # added to match implementation of Negro 2016
 def _square(da, xp, x):
