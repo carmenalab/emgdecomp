@@ -106,7 +106,7 @@ See documentation on classes `EmgDecomposition` and `EmgDecompositionParameters`
 ## Acknowledgements
 If you enjoy this package and use it for your research, you can:
 
-- cite the Journal of Neural Engineering paper, Formento et. al 2021, for which this package was developed: TODO
+- cite the Journal of Neural Engineering paper, Formento et. al 2021, for which this package was developed: 10.1088/1741-2552/ac35ac
 - cite this github repo using its DOI: 10.5281/zenodo.5641426
 - star this repo using the top-right star button.
 
